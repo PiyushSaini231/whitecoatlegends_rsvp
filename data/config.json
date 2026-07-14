@@ -1,0 +1,21 @@
+{
+  "headline": "We cordially invite you to A GRAND PREMIERE",
+  "series": "WHITE COAT LEGENDS",
+  "tagline": "A documentary honoring the visionary journey of",
+  "honoree": "Dr. Milind V. Kirtane",
+  "honoreeCredentials": "Padma Shri Awardee, Consultant ENT Surgeon, MS, DORL, FNAMS, DSc (Hon)",
+  "dateTime": "Saturday, 1st August, 07:00 PM onwards",
+  "venue": "Grand Ballroom, JW Marriott Sahar, Mumbai",
+  "footerLine": "* Entry by invitation only",
+  "availabilityOptions": [
+    "Attending",
+    "Not Attending"
+  ],
+  "accentColor": "#D4AF37",
+  "primaryColor": "#7a0c1e",
+  "secondaryColor": "#0a192f",
+  "logoDocflix": "",
+  "logoMankind": "",
+  "countdownTarget": "2026-08-01T19:00:00",
+  "adminPassword": "admin"
+}

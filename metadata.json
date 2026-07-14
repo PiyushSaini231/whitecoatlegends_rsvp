@@ -1,0 +1,6 @@
+{
+  "name": "Docflix Event RSVP",
+  "description": "An elegant event RSVP and custom premiere landing page for Docflix series White Coat Legends, complete with an admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
