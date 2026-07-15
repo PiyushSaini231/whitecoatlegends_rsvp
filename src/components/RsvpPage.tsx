@@ -9,23 +9,24 @@ import {
   Clock,
   Sparkles,
 } from "lucide-react";
-import { EventConfig } from "../types";
-import { DocflixLogo, MankindLogo } from "./Logos";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
-import { fetchCampaignDetails } from "../store/slices/campaignSlice";
 import { submitRsvp } from "../store/slices/rsvpSlice";
-import { DEFAULT_CAMPAIGN_ID } from "../api/services/campaignService";
+
+const AVAILABILITY_OPTIONS = ["interested", "not interested"] as const;
 
 interface RsvpPageProps {
-  config: EventConfig;
   onAdminClick: () => void;
 }
 
-export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
+export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
+  const dispatch = useAppDispatch();
+  const campaignData = useAppSelector((state) => state.campaign.campaignData);
+  const isRsvpLoading = useAppSelector((state) => state.rsvp.isRsvpLoading);
+
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
-    availability: config.availabilityOptions[0] || "Attending",
+    availability: "interested" as (typeof AVAILABILITY_OPTIONS)[number],
   });
 
   const [timeLeft, setTimeLeft] = useState({
@@ -39,30 +40,6 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
   const [errorMsg, setErrorMsg] = useState("");
   const [submittedName, setSubmittedName] = useState("");
   const [submittedAvailability, setSubmittedAvailability] = useState("");
-  const [attendingCount, setAttendingCount] = useState<number | null>(null);
-  const dispatch = useAppDispatch();
-  const campaignData = useAppSelector((state) => state.campaign.campaignData);
-  const isRsvpLoading = useAppSelector((state) => state.rsvp.isRsvpLoading);
-
-  // Fetch the confirmed attending count on load
-  useEffect(() => {
-    const fetchAttendingCount = async () => {
-      try {
-        const response = await fetch("/api/rsvp/count");
-        if (response.ok) {
-          const data = await response.json();
-          setAttendingCount(data.count);
-        }
-      } catch (err) {
-        console.error("Error fetching attending count", err);
-      }
-    };
-    fetchAttendingCount();
-  }, [isSuccess]);
-
-  useEffect(() => {
-    dispatch(fetchCampaignDetails(DEFAULT_CAMPAIGN_ID));
-  }, [dispatch]);
 
   useEffect(() => {
     if (!isSuccess) return;
@@ -70,10 +47,11 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
     return () => clearTimeout(timer);
   }, [isSuccess]);
 
-  // Countdown timer logic
   useEffect(() => {
+    if (!campaignData?.countdownTarget) return;
+
     const calculateTimeLeft = () => {
-      const target = new Date(config.countdownTarget).getTime();
+      const target = new Date(campaignData.countdownTarget).getTime();
       const now = new Date().getTime();
       const difference = target - now;
 
@@ -108,47 +86,36 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
     calculateTimeLeft();
     const interval = setInterval(calculateTimeLeft, 1000);
     return () => clearInterval(interval);
-  }, [config.countdownTarget]);
+  }, [campaignData?.countdownTarget]);
 
-  // Set default availability option if options change
-  useEffect(() => {
-    if (
-      config.availabilityOptions.length > 0 &&
-      !config.availabilityOptions.includes(formData.availability)
-    ) {
-      setFormData((prev) => ({
-        ...prev,
-        availability: config.availabilityOptions[0],
-      }));
-    }
-  }, [config.availabilityOptions]);
+  if (!campaignData) {
+    return null;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
 
-    if (!formData.name.trim()) {
-      setErrorMsg("Please enter your name.");
+    const name = formData.name.trim();
+    if (!name || !/^[a-zA-Z\s]+$/.test(name)) {
+      setErrorMsg("Full name can contain only alphabets and spaces.");
       return;
     }
 
     const cleanPhone = formData.phone.replace(/\D/g, "");
-    if (cleanPhone.length !== 10) {
-      setErrorMsg("Please enter a valid 10-digit Indian phone number.");
-      return;
-    }
-
-    if (!campaignData?.id) {
-      setErrorMsg("Campaign details are not loaded. Please refresh and try again.");
+    if (!cleanPhone || cleanPhone.length > 15) {
+      setErrorMsg(
+        "Phone number can contain only numbers (max 15 digits) and spaces.",
+      );
       return;
     }
 
     try {
       const data = await dispatch(
         submitRsvp({
-          name: formData.name.trim(),
+          name,
           phone: cleanPhone,
-          availability: !formData.availability.toLowerCase().includes("not"),
+          availability: formData.availability === "interested",
           campaignId: campaignData.id,
         }),
       ).unwrap();
@@ -160,7 +127,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
         setFormData({
           name: "",
           phone: "",
-          availability: config.availabilityOptions[0] || "Attending",
+          availability: "interested",
         });
       } else {
         setErrorMsg(data.message || "Something went wrong. Please try again.");
@@ -191,7 +158,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
       id="public-rsvp-root"
       className="min-h-screen relative flex flex-col items-center justify-between text-white overflow-x-hidden selection:bg-[#D4AF37] selection:text-black py-8 px-4 font-sans"
       style={{
-        background: `radial-gradient(circle at 30% 20%, ${config.primaryColor} 0%, ${config.secondaryColor} 70%)`,
+        background: `radial-gradient(circle at 30% 20%, ${campaignData.primaryColor} 0%, ${campaignData.secondaryColor} 70%)`,
       }}
     >
       {/* Repeating background watermark of series title */}
@@ -199,7 +166,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
         <div className="absolute w-[200%] h-[200%] -top-1/2 -left-1/2 transform -rotate-12 flex flex-wrap gap-x-24 gap-y-16 justify-center items-center content-center text-4xl md:text-5xl font-extrabold uppercase tracking-widest font-oswald">
           {Array.from({ length: 40 }).map((_, i) => (
             <span key={i} className="whitespace-nowrap select-none">
-              {config.series}
+              {campaignData.series}
             </span>
           ))}
         </div>
@@ -368,7 +335,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
       <div
         className="hidden lg:block absolute top-0 left-0 bottom-0 w-16 pointer-events-none z-10"
         style={{
-          background: `linear-gradient(90deg, #110002 0%, ${config.primaryColor} 60%, rgba(0,0,0,0.8) 100%)`,
+          background: `linear-gradient(90deg, #110002 0%, ${campaignData.primaryColor} 60%, rgba(0,0,0,0.8) 100%)`,
           boxShadow: "5px 0 15px rgba(0,0,0,0.5)",
         }}
       >
@@ -383,7 +350,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
       <div
         className="hidden lg:block absolute top-0 right-0 bottom-0 w-16 pointer-events-none z-10"
         style={{
-          background: `linear-gradient(270deg, #01040a 0%, ${config.secondaryColor} 60%, rgba(0,0,0,0.8) 100%)`,
+          background: `linear-gradient(270deg, #01040a 0%, ${campaignData.secondaryColor} 60%, rgba(0,0,0,0.8) 100%)`,
           boxShadow: "-5px 0 15px rgba(0,0,0,0.5)",
         }}
       >
@@ -417,7 +384,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
         >
           {/* Small intro line */}
           <p className="text-[11px] md:text-[13px] tracking-[0.25em] text-[#FFFDD0] font-light uppercase opacity-90 mb-2">
-            {config.headline.split(" A GRAND PREMIERE")[0]}
+            {campaignData.headline.split(" A GRAND PREMIERE")[0]}
           </p>
 
           {/* Headline - "A GRAND PREMIERE" */}
@@ -433,7 +400,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
               fontStretch: "condensed",
             }}
           >
-            {config.series}
+            {campaignData.series}
           </h1>
 
           {/* Gold divider flourish */}
@@ -455,17 +422,19 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
 
           {/* Tagline */}
           <p className="text-xs md:text-sm font-light text-gray-300 italic max-w-xs mb-3">
-            {config.tagline}
+            {campaignData.tagline}
           </p>
 
           {/* Honoree Name in Serif Elegant Italic */}
           <h3 className="text-3xl sm:text-4xl md:text-5xl font-serif italic text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] leading-tight tracking-wide mb-3 font-medium">
-            {config.honoree}
+            {campaignData.honoree.trim().toLowerCase().startsWith("dr.")
+              ? campaignData.honoree
+              : `Dr. ${campaignData.honoree}`}
           </h3>
 
           {/* Credentials */}
           <p className="text-xs md:text-sm font-normal text-gray-200 max-w-sm leading-relaxed tracking-wide mb-8">
-            {config.honoreeCredentials}
+            {campaignData.honoreeCredentials}
           </p>
 
           {/* Gold divider flourish 2 */}
@@ -484,7 +453,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                   Date & Time
                 </h4>
                 <p className="text-xs md:text-sm text-gray-200 font-medium">
-                  {config.dateTime}
+                  {campaignData.dateTime}
                 </p>
               </div>
             </div>
@@ -495,7 +464,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                   Venue
                 </h4>
                 <p className="text-xs md:text-sm text-gray-200 leading-relaxed">
-                  {config.venue}
+                  {campaignData.venue}
                 </p>
               </div>
             </div>
@@ -509,7 +478,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                 style={{ border: 0 }}
                 loading="lazy"
                 allowFullScreen
-                src={`https://maps.google.com/maps?q=${encodeURIComponent(config.venue)}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+                src={`https://maps.google.com/maps?q=${encodeURIComponent(campaignData.venue)}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
                 className="opacity-90 hover:opacity-100 transition-opacity"
               ></iframe>
             </div>
@@ -605,12 +574,12 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                           id="rsvp-name"
                           type="text"
                           required
-                          placeholder="Dr. Name Surname"
+                          placeholder="Name Surname"
                           value={formData.name}
                           onChange={(e) =>
                             setFormData((prev) => ({
                               ...prev,
-                              name: e.target.value,
+                              name: e.target.value.replace(/[^a-zA-Z\s]/g, ""),
                             }))
                           }
                           className="w-full bg-black/60 border border-white/15 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-gray-500 transition-all outline-none"
@@ -632,21 +601,23 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                           id="rsvp-phone"
                           type="tel"
                           required
-                          maxLength={15}
-                          placeholder="10-digit mobile number"
+                          placeholder="Phone number"
                           value={formData.phone}
-                          onChange={(e) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              phone: e.target.value,
-                            }))
-                          }
+                          onChange={(e) => {
+                            const cleaned = e.target.value.replace(
+                              /[^\d\s]/g,
+                              "",
+                            );
+                            if (cleaned.replace(/\D/g, "").length <= 15) {
+                              setFormData((prev) => ({
+                                ...prev,
+                                phone: cleaned,
+                              }));
+                            }
+                          }}
                           className="w-full bg-black/60 border border-white/15 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-gray-500 transition-all outline-none"
                         />
                       </div>
-                      <span className="text-[10px] text-gray-500 mt-1 block">
-                        Indian numbers only (e.g. 9876543210)
-                      </span>
                     </div>
 
                     {/* Attendance Radio Buttons */}
@@ -655,7 +626,7 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                         Your Availability
                       </label>
                       <div className="flex justify-center gap-3 w-full">
-                        {config.availabilityOptions.map((opt) => {
+                        {AVAILABILITY_OPTIONS.map((opt) => {
                           const isSelected = formData.availability === opt;
                           return (
                             <button
@@ -673,7 +644,14 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                                   : "bg-black/50 border-white/10 text-gray-300 hover:border-white/25 hover:bg-black/70"
                               }`}
                             >
-                              {opt}
+                              {opt
+                                .split(" ")
+                                .map(
+                                  (word) =>
+                                    word.charAt(0).toUpperCase() +
+                                    word.slice(1),
+                                )
+                                .join(" ")}
                             </button>
                           );
                         })}
@@ -734,8 +712,8 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                         <span className="font-semibold text-white">
                           {submittedName}
                         </span>
-                        . Your RSVP seat has been locked into the grand guest
-                        ledger.
+                        . for letting us know. We appreciate your response. We
+                        hope to see you at a future event.
                       </>
                     ) : (
                       <>
@@ -760,51 +738,36 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
 
       {/* Footer Branding - Docflix & Mankind Logos side-by-side */}
       <footer className="w-full max-w-lg flex flex-col items-center z-10 mt-6 border-t border-white/5 pt-8">
-        <div className="flex items-center justify-center gap-6 md:gap-10 mb-6">
-          {/* Docflix Logo Slot */}
-          <div className="flex flex-col items-center justify-center">
-            {config.logoDocflix ? (
-              <img
-                src={config.logoDocflix}
-                alt="Docflix Logo"
-                className="h-10 object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <DocflixLogo className="h-9 w-auto text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]" />
-            )}
+        <div className="flex items-center justify-center gap-8">
+          {/* Docflix */}
+          <div className="flex h-14 items-center justify-center">
+            <img
+              src="/assets/docflixlogo.png"
+              alt="Docflix"
+              className="h-6 w-auto object-contain"
+            />
           </div>
 
-          {/* Thin partition */}
-          <div className="h-8 w-[1px] bg-white/15"></div>
+          {/* Divider */}
+          <div className="h-12 w-px bg-white/15" />
 
-          {/* Mankind Logo Slot */}
-          <div className="flex flex-col items-center justify-center">
-            {config.logoMankind ? (
-              <img
-                src={config.logoMankind}
-                alt="Mankind Logo"
-                className="h-10 object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <MankindLogo className="h-11 w-auto drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]" />
-            )}
+          {/* Mankind */}
+          <div className="flex h-14 items-center justify-center rounded-lg  px-3 py-2 shadow-sm">
+            <img
+              src="/assets/mainkindlogo.png"
+              alt="Mankind"
+              className="h-12 w-auto object-contain"
+            />
           </div>
         </div>
 
-        {/* Footer legalities */}
-        <p className="text-[10px] md:text-xs tracking-wider text-gray-400 text-center font-mono uppercase mb-4">
-          {config.footerLine}
-        </p>
-
         {/* Admin Dashboard Entry Portal */}
-        <button
+        {/* <button
           onClick={onAdminClick}
           className="text-[9px] uppercase tracking-widest text-gray-600 hover:text-white transition-colors cursor-pointer mt-2"
         >
           Admin Console
-        </button>
+        </button> */}
       </footer>
     </div>
   );

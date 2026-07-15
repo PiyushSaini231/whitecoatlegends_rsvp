@@ -1,0 +1,19 @@
+{
+  "hosting": {
+    "site": "rsvp-docflix",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "server.cjs",
+      "server.cjs.map"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
