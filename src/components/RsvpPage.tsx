@@ -1,8 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Calendar, MapPin, Phone, User, CheckCircle2, Clock, Sparkles } from "lucide-react";
+import {
+  Calendar,
+  MapPin,
+  Phone,
+  User,
+  CheckCircle2,
+  Clock,
+  Sparkles,
+} from "lucide-react";
 import { EventConfig } from "../types";
 import { DocflixLogo, MankindLogo } from "./Logos";
+import { useAppDispatch, useAppSelector } from "../store/hooks";
+import { fetchCampaignDetails } from "../store/slices/campaignSlice";
+import { submitRsvp } from "../store/slices/rsvpSlice";
+import { DEFAULT_CAMPAIGN_ID } from "../api/services/campaignService";
 
 interface RsvpPageProps {
   config: EventConfig;
@@ -16,12 +28,21 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
     availability: config.availabilityOptions[0] || "Attending",
   });
 
-  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0, isOver: false });
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [timeLeft, setTimeLeft] = useState({
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0,
+    isOver: false,
+  });
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [submittedName, setSubmittedName] = useState("");
+  const [submittedAvailability, setSubmittedAvailability] = useState("");
   const [attendingCount, setAttendingCount] = useState<number | null>(null);
+  const dispatch = useAppDispatch();
+  const campaignData = useAppSelector((state) => state.campaign.campaignData);
+  const isRsvpLoading = useAppSelector((state) => state.rsvp.isRsvpLoading);
 
   // Fetch the confirmed attending count on load
   useEffect(() => {
@@ -39,6 +60,16 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
     fetchAttendingCount();
   }, [isSuccess]);
 
+  useEffect(() => {
+    dispatch(fetchCampaignDetails(DEFAULT_CAMPAIGN_ID));
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (!isSuccess) return;
+    const timer = setTimeout(() => setIsSuccess(false), 5000);
+    return () => clearTimeout(timer);
+  }, [isSuccess]);
+
   // Countdown timer logic
   useEffect(() => {
     const calculateTimeLeft = () => {
@@ -47,7 +78,11 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
       const difference = target - now;
 
       if (difference <= 0) {
-        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, isOver: true });
+        setTimeLeft((prev) =>
+          prev.isOver
+            ? prev
+            : { days: 0, hours: 0, minutes: 0, seconds: 0, isOver: true },
+        );
         return;
       }
 
@@ -56,7 +91,18 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
       const minutes = Math.floor((difference / 1000 / 60) % 60);
       const seconds = Math.floor((difference / 1000) % 60);
 
-      setTimeLeft({ days, hours, minutes, seconds, isOver: false });
+      setTimeLeft((prev) => {
+        if (
+          prev.days === days &&
+          prev.hours === hours &&
+          prev.minutes === minutes &&
+          prev.seconds === seconds &&
+          !prev.isOver
+        ) {
+          return prev;
+        }
+        return { days, hours, minutes, seconds, isOver: false };
+      });
     };
 
     calculateTimeLeft();
@@ -66,53 +112,65 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
 
   // Set default availability option if options change
   useEffect(() => {
-    if (config.availabilityOptions.length > 0 && !config.availabilityOptions.includes(formData.availability)) {
-      setFormData((prev) => ({ ...prev, availability: config.availabilityOptions[0] }));
+    if (
+      config.availabilityOptions.length > 0 &&
+      !config.availabilityOptions.includes(formData.availability)
+    ) {
+      setFormData((prev) => ({
+        ...prev,
+        availability: config.availabilityOptions[0],
+      }));
     }
   }, [config.availabilityOptions]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
-    setIsSubmitting(true);
 
     if (!formData.name.trim()) {
       setErrorMsg("Please enter your name.");
-      setIsSubmitting(false);
       return;
     }
 
     const cleanPhone = formData.phone.replace(/\D/g, "");
     if (cleanPhone.length !== 10) {
       setErrorMsg("Please enter a valid 10-digit Indian phone number.");
-      setIsSubmitting(false);
+      return;
+    }
+
+    if (!campaignData?.id) {
+      setErrorMsg("Campaign details are not loaded. Please refresh and try again.");
       return;
     }
 
     try {
-      const response = await fetch("/api/rsvp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
+      const data = await dispatch(
+        submitRsvp({
+          name: formData.name.trim(),
           phone: cleanPhone,
-          availability: formData.availability,
+          availability: !formData.availability.toLowerCase().includes("not"),
+          campaignId: campaignData.id,
         }),
-      });
+      ).unwrap();
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (data.success) {
         setSubmittedName(formData.name);
+        setSubmittedAvailability(formData.availability);
         setIsSuccess(true);
-        setFormData({ name: "", phone: "", availability: config.availabilityOptions[0] || "Attending" });
+        setFormData({
+          name: "",
+          phone: "",
+          availability: config.availabilityOptions[0] || "Attending",
+        });
       } else {
-        setErrorMsg(data.error || "Something went wrong. Please try again.");
+        setErrorMsg(data.message || "Something went wrong. Please try again.");
       }
     } catch (err) {
-      setErrorMsg("Connection error. Please check your internet and try again.");
-    } finally {
-      setIsSubmitting(false);
+      setErrorMsg(
+        typeof err === "string"
+          ? err
+          : "Connection error. Please check your internet and try again.",
+      );
     }
   };
 
@@ -140,7 +198,9 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
       <div className="absolute inset-0 overflow-hidden pointer-events-none select-none z-0 opacity-[0.025]">
         <div className="absolute w-[200%] h-[200%] -top-1/2 -left-1/2 transform -rotate-12 flex flex-wrap gap-x-24 gap-y-16 justify-center items-center content-center text-4xl md:text-5xl font-extrabold uppercase tracking-widest font-oswald">
           {Array.from({ length: 40 }).map((_, i) => (
-            <span key={i} className="whitespace-nowrap select-none">{config.series}</span>
+            <span key={i} className="whitespace-nowrap select-none">
+              {config.series}
+            </span>
           ))}
         </div>
       </div>
@@ -171,7 +231,11 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
 
       {/* Curtains Frame and Gold Ribbon SVG */}
       <div className="absolute top-0 left-0 right-0 h-40 md:h-48 pointer-events-none z-10 overflow-hidden">
-        <svg viewBox="0 0 1000 180" preserveAspectRatio="none" className="w-full h-full drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)]">
+        <svg
+          viewBox="0 0 1000 180"
+          preserveAspectRatio="none"
+          className="w-full h-full drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)]"
+        >
           <defs>
             <linearGradient id="gold-grad" x1="0%" y1="0%" x2="100%" y2="0%">
               <stop offset="0%" stopColor="#FFE07D" />
@@ -180,14 +244,26 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
               <stop offset="75%" stopColor="#FFE07D" />
               <stop offset="100%" stopColor="#AA7C11" />
             </linearGradient>
-            <linearGradient id="red-curtain-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <linearGradient
+              id="red-curtain-grad"
+              x1="0%"
+              y1="0%"
+              x2="100%"
+              y2="0%"
+            >
               <stop offset="0%" stopColor="#1a0003" />
               <stop offset="30%" stopColor="#54050f" />
               <stop offset="50%" stopColor="#2c0106" />
               <stop offset="75%" stopColor="#690614" />
               <stop offset="100%" stopColor="#1a0003" />
             </linearGradient>
-            <linearGradient id="blue-curtain-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <linearGradient
+              id="blue-curtain-grad"
+              x1="0%"
+              y1="0%"
+              x2="100%"
+              y2="0%"
+            >
               <stop offset="0%" stopColor="#020914" />
               <stop offset="30%" stopColor="#102d54" />
               <stop offset="50%" stopColor="#041226" />
@@ -212,12 +288,42 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
           />
 
           {/* Subtle Vertical fold lines */}
-          <path d="M 100 0 L 100 130" stroke="#000" strokeWidth="2" opacity="0.4" />
-          <path d="M 220 0 L 220 120" stroke="#000" strokeWidth="2" opacity="0.4" />
-          <path d="M 320 0 L 320 110" stroke="#000" strokeWidth="2" opacity="0.4" />
-          <path d="M 680 0 L 680 110" stroke="#000" strokeWidth="2" opacity="0.4" />
-          <path d="M 780 0 L 780 120" stroke="#000" strokeWidth="2" opacity="0.4" />
-          <path d="M 900 0 L 900 130" stroke="#000" strokeWidth="2" opacity="0.4" />
+          <path
+            d="M 100 0 L 100 130"
+            stroke="#000"
+            strokeWidth="2"
+            opacity="0.4"
+          />
+          <path
+            d="M 220 0 L 220 120"
+            stroke="#000"
+            strokeWidth="2"
+            opacity="0.4"
+          />
+          <path
+            d="M 320 0 L 320 110"
+            stroke="#000"
+            strokeWidth="2"
+            opacity="0.4"
+          />
+          <path
+            d="M 680 0 L 680 110"
+            stroke="#000"
+            strokeWidth="2"
+            opacity="0.4"
+          />
+          <path
+            d="M 780 0 L 780 120"
+            stroke="#000"
+            strokeWidth="2"
+            opacity="0.4"
+          />
+          <path
+            d="M 900 0 L 900 130"
+            stroke="#000"
+            strokeWidth="2"
+            opacity="0.4"
+          />
 
           {/* Golden Ribbon Swirl Path 1 */}
           <path
@@ -238,33 +344,65 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
 
           {/* Hanging Gold Tassels left and right */}
           <circle cx="15" cy="142" r="5" fill="url(#gold-grad)" />
-          <line x1="15" y1="135" x2="15" y2="140" stroke="url(#gold-grad)" strokeWidth="2" />
+          <line
+            x1="15"
+            y1="135"
+            x2="15"
+            y2="140"
+            stroke="url(#gold-grad)"
+            strokeWidth="2"
+          />
           <circle cx="985" cy="142" r="5" fill="url(#gold-grad)" />
-          <line x1="985" y1="135" x2="985" y2="140" stroke="url(#gold-grad)" strokeWidth="2" />
+          <line
+            x1="985"
+            y1="135"
+            x2="985"
+            y2="140"
+            stroke="url(#gold-grad)"
+            strokeWidth="2"
+          />
         </svg>
       </div>
 
       {/* Side Curtains to frame the content on wide screens */}
-      <div className="hidden lg:block absolute top-0 left-0 bottom-0 w-16 pointer-events-none z-10"
-           style={{
-             background: `linear-gradient(90deg, #110002 0%, ${config.primaryColor} 60%, rgba(0,0,0,0.8) 100%)`,
-             boxShadow: "5px 0 15px rgba(0,0,0,0.5)"
-           }}>
-        <div className="w-full h-full opacity-20" style={{ background: "repeating-linear-gradient(90deg, transparent, transparent 10px, #000 10px, #000 20px)" }} />
+      <div
+        className="hidden lg:block absolute top-0 left-0 bottom-0 w-16 pointer-events-none z-10"
+        style={{
+          background: `linear-gradient(90deg, #110002 0%, ${config.primaryColor} 60%, rgba(0,0,0,0.8) 100%)`,
+          boxShadow: "5px 0 15px rgba(0,0,0,0.5)",
+        }}
+      >
+        <div
+          className="w-full h-full opacity-20"
+          style={{
+            background:
+              "repeating-linear-gradient(90deg, transparent, transparent 10px, #000 10px, #000 20px)",
+          }}
+        />
       </div>
-      <div className="hidden lg:block absolute top-0 right-0 bottom-0 w-16 pointer-events-none z-10"
-           style={{
-             background: `linear-gradient(270deg, #01040a 0%, ${config.secondaryColor} 60%, rgba(0,0,0,0.8) 100%)`,
-             boxShadow: "-5px 0 15px rgba(0,0,0,0.5)"
-           }}>
-        <div className="w-full h-full opacity-20" style={{ background: "repeating-linear-gradient(90deg, transparent, transparent 10px, #000 10px, #000 20px)" }} />
+      <div
+        className="hidden lg:block absolute top-0 right-0 bottom-0 w-16 pointer-events-none z-10"
+        style={{
+          background: `linear-gradient(270deg, #01040a 0%, ${config.secondaryColor} 60%, rgba(0,0,0,0.8) 100%)`,
+          boxShadow: "-5px 0 15px rgba(0,0,0,0.5)",
+        }}
+      >
+        <div
+          className="w-full h-full opacity-20"
+          style={{
+            background:
+              "repeating-linear-gradient(90deg, transparent, transparent 10px, #000 10px, #000 20px)",
+          }}
+        />
       </div>
 
       {/* Header and Brand Indicator */}
       <header className="w-full max-w-lg flex flex-col items-center text-center z-10 mt-14 md:mt-18">
         <div className="flex items-center gap-1.5 px-3 py-1 bg-black/40 border border-[#D4AF37]/30 rounded-full backdrop-blur-md mb-6 shadow-[0_4px_12px_rgba(0,0,0,0.5)]">
           <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-pulse"></span>
-          <span className="text-[10px] md:text-xs font-medium tracking-[0.25em] text-[#FFE07D] uppercase font-mono">Exclusive Doctor Premiere</span>
+          <span className="text-[10px] md:text-xs font-medium tracking-[0.25em] text-[#FFE07D] uppercase font-mono">
+            Exclusive Doctor Premiere
+          </span>
         </div>
       </header>
 
@@ -301,8 +439,14 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
           {/* Gold divider flourish */}
           <div className="flex items-center justify-center gap-4 w-full max-w-[280px] mb-6">
             <div className="h-[1px] flex-grow bg-gradient-to-r from-transparent to-[#D4AF37]"></div>
-            <svg viewBox="0 0 24 24" className="w-5 h-5 text-[#D4AF37] fill-current">
-              <path d="M12,2A10,10,0,1,0,22,12,10,10,0,0,0,12,2Zm1,14.5a1,1,0,1,1-2,0v-5a1,1,0,0,1,2,0Zm-1-7.25a1.13,1.13,0,1,1,1.13-1.13A1.13,1.13,0,0,1,12,9.25Z" className="hidden" />
+            <svg
+              viewBox="0 0 24 24"
+              className="w-5 h-5 text-[#D4AF37] fill-current"
+            >
+              <path
+                d="M12,2A10,10,0,1,0,22,12,10,10,0,0,0,12,2Zm1,14.5a1,1,0,1,1-2,0v-5a1,1,0,0,1,2,0Zm-1-7.25a1.13,1.13,0,1,1,1.13-1.13A1.13,1.13,0,0,1,12,9.25Z"
+                className="hidden"
+              />
               {/* Classical flourish shape */}
               <path d="M12 2 C11.5 5, 9 7, 6 7 C9 7, 11 9, 11.5 12 C12 9, 14 7, 17 7 C14 7, 12.5 5, 12 2" />
             </svg>
@@ -336,15 +480,23 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
             <div className="flex items-start gap-3">
               <Calendar className="w-5 h-5 text-[#D4AF37] shrink-0 mt-0.5" />
               <div>
-                <h4 className="text-[10px] uppercase tracking-wider text-[#FFE07D] font-medium mb-0.5 font-mono">Date & Time</h4>
-                <p className="text-xs md:text-sm text-gray-200 font-medium">{config.dateTime}</p>
+                <h4 className="text-[10px] uppercase tracking-wider text-[#FFE07D] font-medium mb-0.5 font-mono">
+                  Date & Time
+                </h4>
+                <p className="text-xs md:text-sm text-gray-200 font-medium">
+                  {config.dateTime}
+                </p>
               </div>
             </div>
             <div className="flex items-start gap-3 border-t border-white/5 pt-3">
               <MapPin className="w-5 h-5 text-[#D4AF37] shrink-0 mt-0.5" />
               <div>
-                <h4 className="text-[10px] uppercase tracking-wider text-[#FFE07D] font-medium mb-0.5 font-mono">Venue</h4>
-                <p className="text-xs md:text-sm text-gray-200 leading-relaxed">{config.venue}</p>
+                <h4 className="text-[10px] uppercase tracking-wider text-[#FFE07D] font-medium mb-0.5 font-mono">
+                  Venue
+                </h4>
+                <p className="text-xs md:text-sm text-gray-200 leading-relaxed">
+                  {config.venue}
+                </p>
               </div>
             </div>
 
@@ -382,7 +534,10 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                   { label: "MINS", val: timeLeft.minutes },
                   { label: "SECS", val: timeLeft.seconds },
                 ].map((col, idx) => (
-                  <div key={idx} className="bg-black/40 border border-white/10 rounded-lg py-2.5 px-1 backdrop-blur-md shadow-[0_4px_8px_rgba(0,0,0,0.3)]">
+                  <div
+                    key={idx}
+                    className="bg-black/40 border border-white/10 rounded-lg py-2.5 px-1 backdrop-blur-md shadow-[0_4px_8px_rgba(0,0,0,0.3)]"
+                  >
                     <span className="block text-lg md:text-2xl font-bold font-mono text-white leading-none">
                       {String(col.val).padStart(2, "0")}
                     </span>
@@ -409,27 +564,39 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                 >
                   <h3 className="text-base font-semibold uppercase tracking-wider text-white border-b border-white/10 pb-3 mb-5 flex items-center justify-between font-mono">
                     <span>Confirm Attendance</span>
-                    <span className="text-[10px] text-[#D4AF37] font-normal lowercase italic">Rsvp in under 60 seconds</span>
+                    <span className="text-[10px] text-[#D4AF37] font-normal lowercase italic">
+                      Rsvp in under 60 seconds
+                    </span>
                   </h3>
 
                   <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Live Confirmed Attending Counter */}
-                    {attendingCount !== null && (
+                    {/* {attendingCount !== null && (
                       <div className="bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg p-3 flex items-center gap-2.5 text-xs text-[#FFE07D] font-mono shadow-inner">
                         <Sparkles className="w-4 h-4 text-[#D4AF37] animate-pulse shrink-0" />
                         {attendingCount > 0 ? (
                           <span className="leading-relaxed">
-                            Join <strong className="text-white font-extrabold">{attendingCount}</strong> other legend{attendingCount > 1 ? 's' : ''} already attending!
+                            Join{" "}
+                            <strong className="text-white font-extrabold">
+                              {attendingCount}
+                            </strong>{" "}
+                            other legend{attendingCount > 1 ? "s" : ""} already
+                            attending!
                           </span>
                         ) : (
-                          <span className="leading-relaxed">Be the first to secure your VIP seat!</span>
+                          <span className="leading-relaxed">
+                            Be the first to secure your VIP seat!
+                          </span>
                         )}
                       </div>
-                    )}
+                    )} */}
 
                     {/* Name Input */}
                     <div>
-                      <label htmlFor="rsvp-name" className="block text-[11px] uppercase tracking-wider text-gray-400 font-medium mb-1.5 font-mono">
+                      <label
+                        htmlFor="rsvp-name"
+                        className="block text-[11px] uppercase tracking-wider text-gray-400 font-medium mb-1.5 font-mono"
+                      >
                         Full Name <span className="text-red-500">*</span>
                       </label>
                       <div className="relative">
@@ -440,7 +607,12 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                           required
                           placeholder="Dr. Name Surname"
                           value={formData.name}
-                          onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              name: e.target.value,
+                            }))
+                          }
                           className="w-full bg-black/60 border border-white/15 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-gray-500 transition-all outline-none"
                         />
                       </div>
@@ -448,7 +620,10 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
 
                     {/* Phone Input */}
                     <div>
-                      <label htmlFor="rsvp-phone" className="block text-[11px] uppercase tracking-wider text-gray-400 font-medium mb-1.5 font-mono">
+                      <label
+                        htmlFor="rsvp-phone"
+                        className="block text-[11px] uppercase tracking-wider text-gray-400 font-medium mb-1.5 font-mono"
+                      >
                         Mobile Number <span className="text-red-500">*</span>
                       </label>
                       <div className="relative">
@@ -460,11 +635,18 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                           maxLength={15}
                           placeholder="10-digit mobile number"
                           value={formData.phone}
-                          onChange={(e) => setFormData((prev) => ({ ...prev, phone: e.target.value }))}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              phone: e.target.value,
+                            }))
+                          }
                           className="w-full bg-black/60 border border-white/15 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-gray-500 transition-all outline-none"
                         />
                       </div>
-                      <span className="text-[10px] text-gray-500 mt-1 block">Indian numbers only (e.g. 9876543210)</span>
+                      <span className="text-[10px] text-gray-500 mt-1 block">
+                        Indian numbers only (e.g. 9876543210)
+                      </span>
                     </div>
 
                     {/* Attendance Radio Buttons */}
@@ -479,7 +661,12 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                             <button
                               key={opt}
                               type="button"
-                              onClick={() => setFormData((prev) => ({ ...prev, availability: opt }))}
+                              onClick={() =>
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  availability: opt,
+                                }))
+                              }
                               className={`flex-1 py-3 px-4 text-xs font-bold rounded-xl text-center border transition-all cursor-pointer ${
                                 isSelected
                                   ? "bg-gradient-to-b from-[#FFE07D] to-[#AA7C11] text-black border-[#FFE07D] shadow-[0_4px_12px_rgba(212,175,55,0.4)] scale-[1.02]"
@@ -497,10 +684,10 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                     <button
                       id="submit-rsvp-btn"
                       type="submit"
-                      disabled={isSubmitting}
+                      disabled={isRsvpLoading}
                       className="w-full bg-gradient-to-b from-[#FFE07D] via-[#D4AF37] to-[#AA7C11] hover:from-[#FFF0A0] hover:to-[#D4AF37] text-black font-semibold uppercase tracking-widest text-xs py-3.5 rounded-lg transition-all shadow-[0_4px_15px_rgba(212,175,55,0.3)] focus:outline-none focus:ring-2 focus:ring-yellow-300 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 mt-2"
                     >
-                      {isSubmitting ? (
+                      {isRsvpLoading ? (
                         <>
                           <Clock className="w-4 h-4 animate-spin text-black" />
                           <span>Securing Seat...</span>
@@ -534,10 +721,35 @@ export default function RsvpPage({ config, onAdminClick }: RsvpPageProps) {
                   <div className="w-16 h-16 bg-green-950/60 border border-green-500/30 text-green-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner">
                     <CheckCircle2 className="w-8 h-8" />
                   </div>
-                  <h3 className="text-xl font-bold text-white tracking-wide mb-2 font-serif italic">Your Seat Awaits</h3>
-                  <p className="text-xs text-green-400 font-medium font-mono uppercase tracking-widest mb-4">Reservation Secured</p>
+                  <h3 className="text-xl font-bold text-white tracking-wide mb-2 font-serif italic">
+                    Your Seat Awaits
+                  </h3>
+                  <p className="text-xs text-green-400 font-medium font-mono uppercase tracking-widest mb-4">
+                    Reservation Secured
+                  </p>
                   <p className="text-sm text-gray-300 leading-relaxed max-w-xs mx-auto">
-                    Thank you, <span className="font-semibold text-white">{submittedName}</span>. Your RSVP of <span className="text-[#D4AF37] font-semibold">"{formData.availability || "Attending"}"</span> has been locked into the grand guest ledger.
+                    {submittedAvailability.toLowerCase().includes("not") ? (
+                      <>
+                        Thank you,{" "}
+                        <span className="font-semibold text-white">
+                          {submittedName}
+                        </span>
+                        . Your RSVP seat has been locked into the grand guest
+                        ledger.
+                      </>
+                    ) : (
+                      <>
+                        Thank you,{" "}
+                        <span className="font-semibold text-white">
+                          {submittedName}
+                        </span>
+                        . Your RSVP of{" "}
+                        <span className="text-[#D4AF37] font-semibold">
+                          "{submittedAvailability || "Attending"}"
+                        </span>{" "}
+                        has been locked into the grand guest ledger.
+                      </>
+                    )}
                   </p>
                 </motion.div>
               )}
