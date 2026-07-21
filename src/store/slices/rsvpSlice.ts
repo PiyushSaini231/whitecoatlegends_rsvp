@@ -1,7 +1,7 @@
+import axios from "axios";
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
-import { submitRsvp as submitRsvpApi } from "../../api/services/rsvpService";
-import { getApiErrorMessage } from "../../api/axiosInstance";
 import type { RsvpSubmitRequest, RsvpSubmitResponse } from "../../types/rsvp";
+import { API_BASE_URL } from "../config";
 
 export interface RsvpState {
   isRsvpLoading: boolean;
@@ -23,11 +23,22 @@ export const submitRsvp = createAsyncThunk<
   { rejectValue: string }
 >("rsvp/submitRsvp", async (payload, { rejectWithValue }) => {
   try {
-    return await submitRsvpApi(payload);
+    const { data } = await axios.post<RsvpSubmitResponse>(
+      `${API_BASE_URL}/api/v1/rsvp`,
+      payload,
+    );
+    return data;
   } catch (error) {
-    return rejectWithValue(getApiErrorMessage(error, "Failed to submit RSVP."));
+    const detail = axios.isAxiosError(error) ? error.response?.data?.detail : null;
+    return rejectWithValue(
+      typeof detail === "string" && detail.trim()
+        ? detail
+        : "Failed to submit RSVP.",
+    );
   }
 });
+
+
 
 const rsvpSlice = createSlice({
   name: "rsvp",

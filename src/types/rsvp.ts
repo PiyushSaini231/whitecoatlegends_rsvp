@@ -1,7 +1,8 @@
 export interface RsvpSubmitRequest {
   name: string;
   phone: string;
-  availability: boolean;
+  /** Key from campaign.availabilityOptions (e.g. 0, 1, 2) */
+  availability: number;
   campaignId: string;
 }
 

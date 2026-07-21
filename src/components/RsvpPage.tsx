@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Calendar,
@@ -11,22 +11,80 @@ import {
 } from "lucide-react";
 import { useAppDispatch, useAppSelector } from "../store/hooks";
 import { submitRsvp } from "../store/slices/rsvpSlice";
-
-const AVAILABILITY_OPTIONS = ["interested", "not interested"] as const;
+import {
+  DEFAULT_DOCFLIX_LOGO,
+  DEFAULT_MANKIND_LOGO,
+  isUsableLogo,
+} from "../utils/mapCampaignToEventConfig";
 
 interface RsvpPageProps {
   onAdminClick: () => void;
+  isPreview?: boolean;
 }
 
-export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
+export default function RsvpPage({
+  onAdminClick,
+  isPreview = false,
+}: RsvpPageProps) {
   const dispatch = useAppDispatch();
   const campaignData = useAppSelector((state) => state.campaign.campaignData);
   const isRsvpLoading = useAppSelector((state) => state.rsvp.isRsvpLoading);
 
+  const availabilityOptions = useMemo(() => {
+    const opts = campaignData?.availabilityOptions ?? {};
+    // Positive option (key "1") first, then the rest in key order
+    return Object.entries(opts).sort(([a], [b]) => {
+      if (a === "1") return -1;
+      if (b === "1") return 1;
+      return Number(a) - Number(b);
+    });
+  }, [campaignData?.availabilityOptions]);
+
+  const defaultAvailabilityKey =
+    availabilityOptions.find(([key]) => key === "1")?.[0] ??
+    availabilityOptions[0]?.[0] ??
+    "1";
+
+  // Function to display the webinar page for users expected to attend.
+  // const attendingCount = useMemo(() => {
+  //   const actual = campaignData?.interestedCount;
+
+  //   if (actual == null) return null;
+
+  //   const DISPLAY_KEY = "attending_display";
+  //   const ACTUAL_KEY = "attending_actual";
+
+  //   const storedDisplay = parseInt(
+  //     localStorage.getItem(DISPLAY_KEY) || "0",
+  //     10,
+  //   );
+  //   const storedActual = parseInt(localStorage.getItem(ACTUAL_KEY) || "-1", 10);
+
+  //   let display = storedDisplay;
+
+  //   // First time
+  //   if (storedActual === -1) {
+  //     const random = Math.floor(Math.random() * 10) + 45; // 45-54
+
+  //     display = actual < 50 ? actual + random : actual + random;
+  //   } else if (actual > storedActual) {
+  //     // Backend count increased
+  //     display = storedDisplay + (actual - storedActual);
+  //   } else if (actual > display) {
+  //     // Safety: never show less than backend
+  //     display = actual + 5;
+  //   }
+
+  //   localStorage.setItem(DISPLAY_KEY, String(display));
+  //   localStorage.setItem(ACTUAL_KEY, String(actual));
+
+  //   return display;
+  // }, [campaignData?.interestedCount]);
+
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
-    availability: "interested" as (typeof AVAILABILITY_OPTIONS)[number],
+    availability: defaultAvailabilityKey,
   });
 
   const [timeLeft, setTimeLeft] = useState({
@@ -86,7 +144,7 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
     calculateTimeLeft();
     const interval = setInterval(calculateTimeLeft, 1000);
     return () => clearInterval(interval);
-  }, [campaignData?.countdownTarget]);
+  }, []);
 
   if (!campaignData) {
     return null;
@@ -94,6 +152,7 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPreview) return;
     setErrorMsg("");
 
     const name = formData.name.trim();
@@ -103,31 +162,40 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
     }
 
     const cleanPhone = formData.phone.replace(/\D/g, "");
-    if (!cleanPhone || cleanPhone.length > 15) {
-      setErrorMsg(
-        "Phone number can contain only numbers (max 15 digits) and spaces.",
-      );
+
+    if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+      setErrorMsg("Phone number must be between 10 and 15 digits.");
+      return;
+    }
+
+    // Reject numbers like 0000000000, 1111111111, etc.
+    if (/^(\d)\1+$/.test(cleanPhone)) {
+      setErrorMsg("Please enter a valid phone number.");
       return;
     }
 
     try {
+      const selectedLabel =
+        campaignData.availabilityOptions[formData.availability] ??
+        formData.availability;
+
       const data = await dispatch(
         submitRsvp({
           name,
           phone: cleanPhone,
-          availability: formData.availability === "interested",
+          availability: Number(formData.availability),
           campaignId: campaignData.id,
         }),
       ).unwrap();
 
       if (data.success) {
         setSubmittedName(formData.name);
-        setSubmittedAvailability(formData.availability);
+        setSubmittedAvailability(selectedLabel);
         setIsSuccess(true);
         setFormData({
           name: "",
           phone: "",
-          availability: "interested",
+          availability: defaultAvailabilityKey,
         });
       } else {
         setErrorMsg(data.message || "Something went wrong. Please try again.");
@@ -156,11 +224,21 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
   return (
     <div
       id="public-rsvp-root"
-      className="min-h-screen relative flex flex-col items-center justify-between text-white overflow-x-hidden selection:bg-[#D4AF37] selection:text-black py-8 px-4 font-sans"
+      className={`min-h-screen relative flex flex-col items-center justify-between text-white overflow-x-hidden selection:bg-[#D4AF37] selection:text-black px-4 font-sans ${
+        isPreview ? "pt-14 pb-8" : "py-8"
+      }`}
       style={{
         background: `radial-gradient(circle at 30% 20%, ${campaignData.primaryColor} 0%, ${campaignData.secondaryColor} 70%)`,
       }}
     >
+      {isPreview && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-black/80 border-b border-[#D4AF37]/40 px-4 py-2 text-center backdrop-blur-sm">
+          <p className="text-[11px] uppercase tracking-widest font-mono text-[#FFE07D]">
+            Admin Preview — RSVP submissions are disabled
+          </p>
+        </div>
+      )}
+
       {/* Repeating background watermark of series title */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none select-none z-0 opacity-[0.025]">
         <div className="absolute w-[200%] h-[200%] -top-1/2 -left-1/2 transform -rotate-12 flex flex-wrap gap-x-24 gap-y-16 justify-center items-center content-center text-4xl md:text-5xl font-extrabold uppercase tracking-widest font-oswald">
@@ -540,17 +618,20 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
 
                   <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Live Confirmed Attending Counter */}
-                    {/* {attendingCount !== null && (
+                    {campaignData?.interestedCount !== null && (
                       <div className="bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg p-3 flex items-center gap-2.5 text-xs text-[#FFE07D] font-mono shadow-inner">
                         <Sparkles className="w-4 h-4 text-[#D4AF37] animate-pulse shrink-0" />
-                        {attendingCount > 0 ? (
+                        {(campaignData?.interestedCount ?? 0) > 0 ? (
                           <span className="leading-relaxed">
                             Join{" "}
                             <strong className="text-white font-extrabold">
-                              {attendingCount}
+                              {campaignData?.interestedCount}
                             </strong>{" "}
-                            other legend{attendingCount > 1 ? "s" : ""} already
-                            attending!
+                            other legend
+                            {(campaignData?.interestedCount ?? 0) > 1
+                              ? "s"
+                              : ""}{" "}
+                            already attending!
                           </span>
                         ) : (
                           <span className="leading-relaxed">
@@ -558,7 +639,7 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
                           </span>
                         )}
                       </div>
-                    )} */}
+                    )}
 
                     {/* Name Input */}
                     <div>
@@ -576,13 +657,14 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
                           required
                           placeholder="Name Surname"
                           value={formData.name}
+                          disabled={isPreview}
                           onChange={(e) =>
                             setFormData((prev) => ({
                               ...prev,
                               name: e.target.value.replace(/[^a-zA-Z\s]/g, ""),
                             }))
                           }
-                          className="w-full bg-black/60 border border-white/15 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-gray-500 transition-all outline-none"
+                          className="w-full bg-black/60 border border-white/15 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-gray-500 transition-all outline-none disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                       </div>
                     </div>
@@ -603,6 +685,7 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
                           required
                           placeholder="Phone number"
                           value={formData.phone}
+                          disabled={isPreview}
                           onChange={(e) => {
                             const cleaned = e.target.value.replace(
                               /[^\d\s]/g,
@@ -615,7 +698,7 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
                               }));
                             }
                           }}
-                          className="w-full bg-black/60 border border-white/15 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-gray-500 transition-all outline-none"
+                          className="w-full bg-black/60 border border-white/15 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-gray-500 transition-all outline-none disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                       </div>
                     </div>
@@ -625,33 +708,27 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
                       <label className="block text-[11px] uppercase tracking-wider text-gray-400 font-medium mb-3 font-mono text-center">
                         Your Availability
                       </label>
-                      <div className="flex justify-center gap-3 w-full">
-                        {AVAILABILITY_OPTIONS.map((opt) => {
-                          const isSelected = formData.availability === opt;
+                      <div className="flex justify-center gap-2 w-full">
+                        {availabilityOptions.map(([key, label]) => {
+                          const isSelected = formData.availability === key;
                           return (
                             <button
-                              key={opt}
+                              key={key}
                               type="button"
+                              disabled={isPreview}
                               onClick={() =>
                                 setFormData((prev) => ({
                                   ...prev,
-                                  availability: opt,
+                                  availability: key,
                                 }))
                               }
-                              className={`flex-1 py-3 px-4 text-xs font-bold rounded-xl text-center border transition-all cursor-pointer ${
+                              className={`flex-1 min-w-0 py-3 px-2 text-xs font-bold rounded-xl text-center border transition-all cursor-pointer disabled:cursor-not-allowed ${
                                 isSelected
                                   ? "bg-gradient-to-b from-[#FFE07D] to-[#AA7C11] text-black border-[#FFE07D] shadow-[0_4px_12px_rgba(212,175,55,0.4)] scale-[1.02]"
                                   : "bg-black/50 border-white/10 text-gray-300 hover:border-white/25 hover:bg-black/70"
                               }`}
                             >
-                              {opt
-                                .split(" ")
-                                .map(
-                                  (word) =>
-                                    word.charAt(0).toUpperCase() +
-                                    word.slice(1),
-                                )
-                                .join(" ")}
+                              {label}
                             </button>
                           );
                         })}
@@ -662,14 +739,16 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
                     <button
                       id="submit-rsvp-btn"
                       type="submit"
-                      disabled={isRsvpLoading}
-                      className="w-full bg-gradient-to-b from-[#FFE07D] via-[#D4AF37] to-[#AA7C11] hover:from-[#FFF0A0] hover:to-[#D4AF37] text-black font-semibold uppercase tracking-widest text-xs py-3.5 rounded-lg transition-all shadow-[0_4px_15px_rgba(212,175,55,0.3)] focus:outline-none focus:ring-2 focus:ring-yellow-300 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 mt-2"
+                      disabled={isPreview || isRsvpLoading}
+                      className="w-full bg-gradient-to-b from-[#FFE07D] via-[#D4AF37] to-[#AA7C11] hover:from-[#FFF0A0] hover:to-[#D4AF37] text-black font-semibold uppercase tracking-widest text-xs py-3.5 rounded-lg transition-all shadow-[0_4px_15px_rgba(212,175,55,0.3)] focus:outline-none focus:ring-2 focus:ring-yellow-300 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-2"
                     >
                       {isRsvpLoading ? (
                         <>
                           <Clock className="w-4 h-4 animate-spin text-black" />
                           <span>Securing Seat...</span>
                         </>
+                      ) : isPreview ? (
+                        <span>Preview Only</span>
                       ) : (
                         <span>Submit RSVP</span>
                       )}
@@ -696,15 +775,21 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
                   transition={{ duration: 0.4 }}
                   className="bg-gradient-to-b from-[#121c15] to-[#0f1418] p-8 rounded-xl border border-green-500/40 shadow-[0_15px_30px_rgba(0,0,0,0.8)] text-center"
                 >
-                  <div className="w-16 h-16 bg-green-950/60 border border-green-500/30 text-green-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner">
-                    <CheckCircle2 className="w-8 h-8" />
-                  </div>
-                  <h3 className="text-xl font-bold text-white tracking-wide mb-2 font-serif italic">
-                    Your Seat Awaits
-                  </h3>
-                  <p className="text-xs text-green-400 font-medium font-mono uppercase tracking-widest mb-4">
-                    Reservation Secured
-                  </p>
+                  {!submittedAvailability.toLowerCase().includes("not") && (
+                    <>
+                      <div className="w-16 h-16 bg-green-950/60 border border-green-500/30 text-green-400 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner">
+                        <CheckCircle2 className="w-8 h-8" />
+                      </div>
+
+                      <h3 className="text-xl font-bold text-white tracking-wide mb-2 font-serif italic">
+                        Your Seat Awaits
+                      </h3>
+
+                      <p className="text-xs text-green-400 font-medium font-mono uppercase tracking-widest mb-4">
+                        Reservation Secured
+                      </p>
+                    </>
+                  )}
                   <p className="text-sm text-gray-300 leading-relaxed max-w-xs mx-auto">
                     {submittedAvailability.toLowerCase().includes("not") ? (
                       <>
@@ -742,9 +827,16 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
           {/* Docflix */}
           <div className="flex h-14 items-center justify-center">
             <img
-              src="/assets/docflixlogo.png"
+              src={
+                isUsableLogo(campaignData.logoDocflix)
+                  ? campaignData.logoDocflix
+                  : DEFAULT_DOCFLIX_LOGO
+              }
               alt="Docflix"
               className="h-6 w-auto object-contain"
+              onError={(e) => {
+                e.currentTarget.src = DEFAULT_DOCFLIX_LOGO;
+              }}
             />
           </div>
 
@@ -752,22 +844,29 @@ export default function RsvpPage({ onAdminClick }: RsvpPageProps) {
           <div className="h-12 w-px bg-white/15" />
 
           {/* Mankind */}
-          <div className="flex h-14 items-center justify-center rounded-lg  px-3 py-2 shadow-sm">
+          <div className="flex h-14 items-center justify-center rounded-lg px-3 py-2 shadow-sm">
             <img
-              src="/assets/mainkindlogo.png"
+              src={
+                isUsableLogo(campaignData.logoMankind)
+                  ? campaignData.logoMankind
+                  : DEFAULT_MANKIND_LOGO
+              }
               alt="Mankind"
               className="h-12 w-auto object-contain"
+              onError={(e) => {
+                e.currentTarget.src = DEFAULT_MANKIND_LOGO;
+              }}
             />
           </div>
         </div>
 
         {/* Admin Dashboard Entry Portal */}
-        {/* <button
+        <button
           onClick={onAdminClick}
-          className="text-[9px] uppercase tracking-widest text-gray-600 hover:text-white transition-colors cursor-pointer mt-2"
+          className="text-[9px] uppercase tracking-widest text-gray-600 hover:text-white transition-colors cursor-pointer mt-6"
         >
           Admin Console
-        </button> */}
+        </button>
       </footer>
     </div>
   );

@@ -14,7 +14,6 @@ export interface EventConfig {
   logoDocflix: string; // Base64 data URL
   logoMankind: string; // Base64 data URL
   countdownTarget: string; // ISO or date string for timer (e.g. 2026-08-01T19:00:00)
-  adminPassword: string; // Plain password for dashboard access
 }
 
 export interface RSVP {
